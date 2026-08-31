@@ -77,28 +77,27 @@ fun ScanScreen(viewModel: MainViewModel, onDone: () -> Unit, onReview: () -> Uni
                         Text("Back to dashboard")
                     }
                 }
+                ScanUiState.Idle -> {
+                    Text("No scan in progress.")
+                }
                 is ScanUiState.Cleaning -> {
                     CircularProgressIndicator()
                     Spacer(Modifier.height(24.dp))
                     Text("Cleaning…", style = MaterialTheme.typography.headlineMedium)
-                    Spacer(Modifier.height(16.dp))
-                    Text("${s.done} of ${s.total} items processed")
-                    Spacer(Modifier.height(24.dp))
-                    OutlinedButton(onClick = onDone) {
-                        Text("Back to dashboard")
-                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text("Removing ${s.done} of ${s.total} selected items")
                 }
                 is ScanUiState.CleanupDone -> {
                     Text("Cleanup complete", style = MaterialTheme.typography.headlineMedium)
-                    Spacer(Modifier.height(16.dp))
-                    Text("${s.result.deletedCount} files removed · ${s.result.recoveredBytes.toHumanBytes()} recovered")
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "${s.result.deletedCount} files removed · " +
+                            "${s.result.recoveredBytes.toHumanBytes()} recovered"
+                    )
                     Spacer(Modifier.height(24.dp))
                     OutlinedButton(onClick = onDone, modifier = Modifier.fillMaxWidth()) {
                         Text("Back to dashboard")
                     }
-                }
-                ScanUiState.Idle -> {
-                    Text("No scan in progress.")
                 }
             }
         }
