@@ -11,6 +11,8 @@ import com.storagesweep.app.detector.DetectorPipeline
 import com.storagesweep.app.detector.DuplicateDetector
 import com.storagesweep.app.detector.LargeFileDetector
 import com.storagesweep.app.detector.LargeFileThreshold
+import com.storagesweep.app.permission.PermissionManager
+import com.storagesweep.app.permission.StoragePermissionState
 import com.storagesweep.app.scanner.PowerScanEngine
 import com.storagesweep.app.scanner.ScanProgress
 import com.storagesweep.app.scanner.ScanRoot
@@ -50,6 +52,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _storageStats = MutableStateFlow(readStorageStats())
     val storageStats: StateFlow<StorageStats> = _storageStats.asStateFlow()
+
+    private val _permissionState = MutableStateFlow(PermissionManager.checkState(application))
+    val permissionState: StateFlow<StoragePermissionState> = _permissionState.asStateFlow()
 
     private val ownedCacheRoots: List<File>
         get() = buildList {
@@ -110,7 +115,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun onResume() {
         shizukuStateManager.refresh()
         _storageStats.value = readStorageStats()
+        _permissionState.value = PermissionManager.checkState(getApplication())
     }
+
+    /** Called after the runtime-permission dialog result arrives, so state reflects reality immediately. */
+    fun onRuntimePermissionResult() {
+        _permissionState.value = PermissionManager.checkState(getApplication())
+    }
+
+    /** Gate Standard Scan on real granted permissions — never scan and then discover access was denied. */
+    fun canRunStandardScan(): Boolean = _permissionState.value.mediaPermissionsGranted
 
     fun requestShizukuPermission() = shizukuStateManager.requestPermission()
 
@@ -124,6 +138,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startStandardScan() {
         if (_scanState.value is ScanUiState.Scanning) return
+        if (!canRunStandardScan()) return // caller should route to the permission gate instead
         val roots = StandardRootDiscovery.discover(getApplication())
         _scanState.value = ScanUiState.Scanning(null)
         scanJob = viewModelScope.launch {

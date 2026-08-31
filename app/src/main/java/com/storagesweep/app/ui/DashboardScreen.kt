@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.storagesweep.app.permission.StoragePermissionState
 import com.storagesweep.app.shizuku.ShizukuState
 import com.storagesweep.app.ui.components.ShizukuStatusChip
 import com.storagesweep.app.ui.components.StorageRing
@@ -31,10 +32,13 @@ import com.storagesweep.app.util.toHumanBytes
 fun DashboardScreen(
     viewModel: MainViewModel,
     onOpenShizuku: () -> Unit,
+    onRequestStoragePermission: () -> Unit,
+    onOpenAllFilesAccessSettings: () -> Unit,
     onScanStarted: () -> Unit
 ) {
     val shizukuState by viewModel.shizukuState.collectAsStateWithLifecycle()
     val storageStats by viewModel.storageStats.collectAsStateWithLifecycle()
+    val permissionState by viewModel.permissionState.collectAsStateWithLifecycle()
 
     Scaffold { padding ->
         Column(
@@ -73,10 +77,29 @@ fun DashboardScreen(
 
             Spacer(Modifier.height(32.dp))
 
+            if (!permissionState.mediaPermissionsGranted) {
+                PermissionGateCard(
+                    permissionState = permissionState,
+                    onRequestMedia = onRequestStoragePermission,
+                    onOpenAllFiles = onOpenAllFilesAccessSettings
+                )
+                Spacer(Modifier.height(12.dp))
+            } else if (!permissionState.isFullyGranted) {
+                // Media permission granted but MANAGE_EXTERNAL_STORAGE isn't — Standard Scan can
+                // still run (it'll just see fewer roots via StandardRootDiscovery's live check),
+                // so this is an optional upgrade prompt, not a hard gate.
+                OptionalAllFilesAccessCard(onOpenAllFiles = onOpenAllFilesAccessSettings)
+                Spacer(Modifier.height(12.dp))
+            }
+
             Button(
                 onClick = {
-                    viewModel.startStandardScan()
-                    onScanStarted()
+                    if (permissionState.mediaPermissionsGranted) {
+                        viewModel.startStandardScan()
+                        onScanStarted()
+                    } else {
+                        onRequestStoragePermission()
+                    }
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -100,6 +123,49 @@ fun DashboardScreen(
                     viewModel.requestShizukuPermission()
                 })
             }
+        }
+    }
+}
+
+@Composable
+private fun PermissionGateCard(
+    permissionState: StoragePermissionState,
+    onRequestMedia: () -> Unit,
+    onOpenAllFiles: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("Storage permission needed", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "StorageSweep needs access to your files before it can scan.",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Spacer(Modifier.height(12.dp))
+            Button(onClick = onRequestMedia) { Text("Grant access") }
+        }
+    }
+}
+
+@Composable
+private fun OptionalAllFilesAccessCard(onOpenAllFiles: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("Deeper scan available", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Grant All Files Access so Standard Scan can see your full shared storage, " +
+                    "not just app-specific folders. Optional — scanning still works without it.",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Spacer(Modifier.height(12.dp))
+            OutlinedButton(onClick = onOpenAllFiles) { Text("Open settings") }
         }
     }
 }
