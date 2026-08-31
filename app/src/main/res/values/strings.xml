@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">StorageSweep</string>
+
+    <string name="shizuku_unavailable">Shizuku is off</string>
+    <string name="shizuku_service_stopped">Shizuku running — permission required</string>
+    <string name="shizuku_unauthorized">Shizuku running — permission required</string>
+    <string name="shizuku_authorized">Power Scan Ready</string>
+
+    <string name="shizuku_required_message">Shizuku is required for Power Scan.</string>
+    <string name="shizuku_required_body">Start the Shizuku app and authorize StorageSweep to enable deeper, privileged-but-non-root scanning.</string>
+    <string name="shizuku_open_action">Open Shizuku</string>
+    <string name="shizuku_permission_required">Permission required</string>
+    <string name="shizuku_allow_action">Allow StorageSweep</string>
+
+    <string name="standard_scan">Standard Scan</string>
+    <string name="power_scan">Power Scan</string>
+    <string name="last_scan_none">No scans yet</string>
+</resources>

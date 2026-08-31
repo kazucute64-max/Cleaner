@@ -1,0 +1,134 @@
+package com.storagesweep.app.ui
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.storagesweep.app.scanner.ScanCandidate
+import com.storagesweep.app.scanner.ScanSummary
+import com.storagesweep.app.util.toHumanBytes
+
+@Composable
+fun ReviewScreen(viewModel: MainViewModel, summary: ScanSummary, onDone: () -> Unit) {
+    val selected by viewModel.selectedPaths.collectAsStateWithLifecycle()
+    var showConfirm by remember { mutableStateOf(false) }
+
+    val selectedCandidates = summary.candidates.filter { it.path in selected }
+    val selectedBytes = selectedCandidates.sumOf { it.sizeBytes }
+
+    Scaffold { padding ->
+        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                TextButton(onClick = { viewModel.selectAllSafe(summary) }) { Text("Select all safe") }
+                TextButton(onClick = { viewModel.deselectAll() }) { Text("Deselect all") }
+            }
+
+            LazyColumn(modifier = Modifier.weight(1f)) {
+                val byCategory = summary.candidates.groupBy { it.category }
+                byCategory.forEach { (category, items) ->
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "$category (${items.sumOf { it.sizeBytes }.toHumanBytes()})",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            TextButton(onClick = { viewModel.selectCategory(summary, category) }) {
+                                Text("Select all")
+                            }
+                        }
+                    }
+                    items(items, key = { it.path }) { candidate ->
+                        CandidateRow(
+                            candidate = candidate,
+                            checked = candidate.path in selected,
+                            onToggle = { viewModel.toggleSelection(candidate.path) }
+                        )
+                    }
+                }
+            }
+
+            Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                Text(
+                    "${selectedCandidates.size} items selected · ${selectedBytes.toHumanBytes()}",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                androidx.compose.foundation.layout.Spacer(Modifier.padding(4.dp))
+                Button(
+                    onClick = { if (selectedCandidates.isNotEmpty()) showConfirm = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Review & delete selected")
+                }
+            }
+        }
+    }
+
+    if (showConfirm) {
+        AlertDialog(
+            onDismissRequest = { showConfirm = false },
+            title = { Text("Confirm cleanup") },
+            text = {
+                Text(
+                    "You are about to remove ${selectedCandidates.size} files and recover " +
+                        "approximately ${selectedBytes.toHumanBytes()}."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showConfirm = false
+                    viewModel.confirmCleanup(summary)
+                    onDone()
+                }) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showConfirm = false }) { Text("Cancel") }
+            }
+        )
+    }
+}
+
+@Composable
+private fun CandidateRow(candidate: ScanCandidate, checked: Boolean, onToggle: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Checkbox(checked = checked, onCheckedChange = { onToggle() })
+        Column(modifier = Modifier.weight(1f)) {
+            Text(candidate.path, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+            Text(
+                "${candidate.sizeBytes.toHumanBytes()} · ${candidate.reason}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2
+            )
+        }
+    }
+}
