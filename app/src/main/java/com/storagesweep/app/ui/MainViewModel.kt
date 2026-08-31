@@ -12,6 +12,17 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.workDataOf
 import com.storagesweep.app.StorageSweepApp
+import com.storagesweep.app.appmanager.AppRepository
+import com.storagesweep.app.appmanager.InstalledApp
+import com.storagesweep.app.appmanager.LeftoverItem
+import com.storagesweep.app.appmanager.AppCacheEntry
+import com.storagesweep.app.appmanager.OrphanedDirectory
+import com.storagesweep.app.appmanager.CacheRepository
+import com.storagesweep.app.appmanager.OrphanRepository
+import com.storagesweep.app.appmanager.OrphanDeletion
+import com.storagesweep.app.apk.ApkEntry
+import com.storagesweep.app.apk.ApkRepository
+import com.storagesweep.app.apk.ApkFileManager
 import com.storagesweep.app.cleanup.CleanupCandidateCodec
 import com.storagesweep.app.cleanup.CleanupStateRepository
 import com.storagesweep.app.cleanup.work.CleanupWorker
@@ -32,6 +43,10 @@ import com.storagesweep.app.settings.AppSettings
 import com.storagesweep.app.settings.SettingsRepository
 import com.storagesweep.app.shizuku.ShizukuIpcClient
 import com.storagesweep.app.shizuku.ShizukuState
+import com.storagesweep.app.storage.LargeFileItem
+import com.storagesweep.app.storage.StorageCategorySize
+import com.storagesweep.app.storage.StorageFileItem
+import com.storagesweep.app.storage.StorageScanner
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
@@ -55,6 +70,30 @@ sealed interface ScanUiState {
 
 data class StorageStats(val totalBytes: Long, val freeBytes: Long) {
     val usedBytes: Long get() = totalBytes - freeBytes
+}
+
+sealed interface CacheUiState {
+    data object Idle : CacheUiState
+    data object Loading : CacheUiState
+    data class Ready(val entries: List<AppCacheEntry>) : CacheUiState
+}
+
+sealed interface OrphanUiState {
+    data object Idle : OrphanUiState
+    data object Loading : OrphanUiState
+    data class Ready(val items: List<OrphanedDirectory>) : OrphanUiState
+}
+
+sealed interface ApkUiState {
+    data object Idle : ApkUiState
+    data object Loading : ApkUiState
+    data class Ready(val entries: List<ApkEntry>) : ApkUiState
+}
+
+sealed interface LeftoverUiState {
+    data object Idle : LeftoverUiState
+    data object Scanning : LeftoverUiState
+    data class Ready(val packageName: String, val items: List<LeftoverItem>) : LeftoverUiState
 }
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -81,15 +120,198 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _permissionState = MutableStateFlow(PermissionManager.checkState(application))
     val permissionState: StateFlow<StoragePermissionState> = _permissionState.asStateFlow()
 
+    private val _installedApps = MutableStateFlow<List<InstalledApp>>(emptyList())
+    val installedApps: List<InstalledApp> get() = _installedApps.value
+    val storageStatsAvailable: Boolean get() = AppRepository.storageStatsAvailable(getApplication())
+
+    private val _cacheState = MutableStateFlow<CacheUiState>(CacheUiState.Idle)
+    val cacheState: StateFlow<CacheUiState> = _cacheState.asStateFlow()
+
+    private val _orphanState = MutableStateFlow<OrphanUiState>(OrphanUiState.Idle)
+    val orphanState: StateFlow<OrphanUiState> = _orphanState.asStateFlow()
+
+    private val _leftoverState = MutableStateFlow<LeftoverUiState>(LeftoverUiState.Idle)
+    private val _apkState = MutableStateFlow<ApkUiState>(ApkUiState.Idle)
+    val apkState: StateFlow<ApkUiState> = _apkState.asStateFlow()
+    val leftoverState: StateFlow<LeftoverUiState> = _leftoverState.asStateFlow()
+
     // Tracked separately from ScanUiState because Results only reflects the most recent scan
     // while it's still being viewed — the capability report needs "last scan this session"
     // even after the user has navigated away, without pretending a scan happened if none did.
     private val _lastScanSummary = MutableStateFlow<ScanSummary?>(null)
 
+    private val _storageDirectory = MutableStateFlow<List<StorageFileItem>>(emptyList())
+    val storageDirectory: StateFlow<List<StorageFileItem>> = _storageDirectory.asStateFlow()
+    private val _storageCategories = MutableStateFlow<List<StorageCategorySize>>(emptyList())
+    val storageCategories: StateFlow<List<StorageCategorySize>> = _storageCategories.asStateFlow()
+    private val _largeFiles = MutableStateFlow<List<LargeFileItem>>(emptyList())
+    val largeFiles: StateFlow<List<LargeFileItem>> = _largeFiles.asStateFlow()
+    private val _storageToolsLoading = MutableStateFlow(false)
+    val storageToolsLoading: StateFlow<Boolean> = _storageToolsLoading.asStateFlow()
+    private var storagePath = Environment.getExternalStorageDirectory().absolutePath
+    val currentStoragePath: String get() = storagePath
+    var largeFileThresholdMb: Long = 100L
+        private set
+
+
     private val settingsRepository = SettingsRepository(application)
     val settings: StateFlow<AppSettings> = settingsRepository.settings.stateIn(
         viewModelScope, SharingStarted.Eagerly, AppSettings.DEFAULT
     )
+
+    init {
+        refreshInstalledApps()
+        openStorageRoot()
+    }
+
+    fun openStorageRoot() {
+        storagePath = Environment.getExternalStorageDirectory().absolutePath
+        refreshStorageDirectory()
+    }
+
+    fun openStorageDirectory(path: String) {
+        val root = Environment.getExternalStorageDirectory().canonicalFile
+        val target = runCatching { File(path).canonicalFile }.getOrNull() ?: return
+        if (target.path != root.path && !target.path.startsWith(root.path + File.separator)) return
+        if (!target.isDirectory) return
+        storagePath = target.absolutePath
+        refreshStorageDirectory()
+    }
+
+    fun refreshStorageDirectory() {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            _storageDirectory.value = StorageScanner.listDirectory(File(storagePath))
+        }
+    }
+
+    fun canStorageGoUp(): Boolean {
+        val root = runCatching { Environment.getExternalStorageDirectory().canonicalPath }.getOrNull() ?: return false
+        val current = runCatching { File(storagePath).canonicalPath }.getOrNull() ?: return false
+        return current != root && current.startsWith(root + File.separator)
+    }
+
+    fun storageGoUp() {
+        if (!canStorageGoUp()) return
+        val root = runCatching { Environment.getExternalStorageDirectory().canonicalFile }.getOrNull() ?: return
+        val current = runCatching { File(storagePath).canonicalFile }.getOrNull() ?: return
+        val parent = current.parentFile ?: return
+        if (parent.path == root.path || parent.path.startsWith(root.path + File.separator)) {
+            storagePath = parent.absolutePath
+            refreshStorageDirectory()
+        }
+    }
+
+    fun scanStorageBreakdown() {
+        _storageToolsLoading.value = true
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                _storageCategories.value = StorageScanner.categorySizes(Environment.getExternalStorageDirectory())
+            } finally {
+                _storageToolsLoading.value = false
+            }
+        }
+    }
+
+    fun setLargeFileThresholdMb(mb: Long) {
+        if (mb in listOf(100L, 500L, 1024L, 2048L)) largeFileThresholdMb = mb
+    }
+
+    fun scanLargeFiles() {
+        _storageToolsLoading.value = true
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val threshold = largeFileThresholdMb * 1024L * 1024L
+                val roots = StandardRootDiscovery.discover(getApplication()).map { it.file }
+                _largeFiles.value = StorageScanner.findLargeFiles(roots, threshold)
+            } finally {
+                _storageToolsLoading.value = false
+            }
+        }
+    }
+
+    fun refreshInstalledApps() {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            _installedApps.value = AppRepository.getInstalledApps(getApplication())
+        }
+    }
+
+    fun scanAppCaches() {
+        _cacheState.value = CacheUiState.Loading
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            _cacheState.value = CacheUiState.Ready(CacheRepository.getEntries(getApplication()))
+        }
+    }
+
+    fun clearAppCache(packageName: String) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            if (shizukuStateManager.state.value != ShizukuState.RUNNING_AUTHORIZED) return@launch
+            val ok = ipcClient.clearPackageCache(packageName)
+            if (ok) _cacheState.value = CacheUiState.Ready(CacheRepository.getEntries(getApplication()))
+        }
+    }
+
+    fun scanOrphanedDirectories() {
+        _orphanState.value = OrphanUiState.Loading
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            _orphanState.value = OrphanUiState.Ready(OrphanRepository.scan(getApplication()))
+        }
+    }
+
+    fun deleteOrphan(path: String) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val state = _orphanState.value
+            if (state !is OrphanUiState.Ready) return@launch
+            val item = state.items.firstOrNull { it.path == path } ?: return@launch
+            if (OrphanDeletion.delete(item.path)) {
+                _orphanState.value = OrphanUiState.Ready(state.items.filterNot { it.path == path })
+            }
+        }
+    }
+
+    fun scanApks() {
+        _apkState.value = ApkUiState.Loading
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            _apkState.value = ApkUiState.Ready(ApkRepository.scan(getApplication()))
+        }
+    }
+
+    fun deleteApk(path: String) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val state = _apkState.value
+            if (state !is ApkUiState.Ready) return@launch
+            if (ApkFileManager.delete(getApplication(), path)) {
+                _apkState.value = ApkUiState.Ready(state.entries.filterNot { it.path == path })
+            }
+        }
+    }
+
+    fun scanForUninstallLeftovers(packageName: String) {
+        _leftoverState.value = LeftoverUiState.Scanning
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val items = try { AppRepository.findLeftovers(getApplication(), packageName) } catch (_: Exception) { emptyList() }
+            _leftoverState.value = LeftoverUiState.Ready(packageName, items)
+            refreshInstalledApps()
+        }
+    }
+
+    fun deleteLeftover(path: String) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val file = File(path)
+            if (!file.exists()) return@launch
+            // Only allow deletion of the exact item currently presented by the leftover scan.
+            val state = _leftoverState.value
+            if (state !is LeftoverUiState.Ready) return@launch
+            val item = state.items.firstOrNull { it.path == path } ?: return@launch
+            if (item.confidence != com.storagesweep.app.appmanager.Confidence.SAFE) return@launch
+            val root = Environment.getExternalStorageDirectory().canonicalFile
+            val target = try { file.canonicalFile } catch (_: Exception) { return@launch }
+            val allowed = target.path == root.path || target.path.startsWith(root.path + File.separator)
+            if (!allowed) return@launch
+            if (file.isDirectory) file.deleteRecursively() else file.delete()
+            val remaining = AppRepository.findLeftovers(getApplication(), state.packageName)
+            _leftoverState.value = state.copy(items = remaining)
+        }
+    }
 
     fun setLargeFileThreshold(threshold: com.storagesweep.app.detector.LargeFileThreshold) {
         viewModelScope.launch { settingsRepository.setLargeFileThreshold(threshold) }
@@ -146,10 +368,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // even though it's running in a different CoroutineScope than scanJob.
     private var serviceScanDeferred: Deferred<*>? = null
 
+    // BUG FIX (found on re-analysis): onServiceConnected is async and can legitimately fire
+    // *after* stopForegroundScanService() has already run for that scan — e.g. binding takes
+    // longer than runScanInServiceScopeOrHere's 2s wait AND the fallback in-viewModelScope work
+    // finishes before the connection callback arrives. Previously, onServiceConnected always
+    // called beginObserving() unconditionally, which would start a fresh "Starting scan…"
+    // foreground notification for a scan that had already completed — and since
+    // stopForegroundScanService() had already run (and won't run again), finishObserving() would
+    // never be called on it, leaving a permanently stuck ongoing notification until the process
+    // died. scanActive tracks whether the scan this connection belongs to is still genuinely in
+    // flight; a late arrival now tears the service back down immediately instead of adopting it.
+    @Volatile
+    private var scanActive = false
+
     private val foregroundServiceConnection = object : android.content.ServiceConnection {
         override fun onServiceConnected(name: android.content.ComponentName, binder: android.os.IBinder) {
             val local = binder as com.storagesweep.app.scanner.ScanForegroundService.LocalBinder
             val service = local.service()
+            if (!scanActive) {
+                // Late arrival after the scan already finished (or was cancelled) via the
+                // fallback path — don't adopt it, just let it stop itself. No notification was
+                // ever shown for this connection, so there's nothing to un-show either.
+                try {
+                    service.finishObserving(null)
+                } catch (e: Exception) {
+                    // Service already tearing down on its own — nothing further to do.
+                }
+                return
+            }
             foregroundServiceBinder = service
             service.beginObserving(scannerEngine.progress)
             serviceReady.complete(service)
@@ -160,6 +406,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun startForegroundScanService() {
+        scanActive = true
         serviceReady = CompletableDeferred()
         val intent = android.content.Intent(getApplication(), com.storagesweep.app.scanner.ScanForegroundService::class.java)
         try {
@@ -174,6 +421,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun stopForegroundScanService(finalSummary: ScanSummary?) {
+        // Set before touching the binder: if onServiceConnected is racing us right now, it must
+        // see scanActive=false and refuse to adopt the service, not beginObserving() a scan
+        // we're in the middle of tearing down.
+        scanActive = false
         foregroundServiceBinder?.finishObserving(finalSummary)
         try {
             getApplication<Application>().unbindService(foregroundServiceConnection)

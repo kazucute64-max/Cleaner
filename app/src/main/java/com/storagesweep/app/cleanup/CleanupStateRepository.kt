@@ -89,11 +89,21 @@ class CleanupStateRepository(private val context: Context) {
             is DeletionOutcome.AlreadyGone -> path
         }
 
+    // BUG FIX (found on re-analysis): unlike CleanupCandidateCodec's encode() — which sanitizes
+    // every field against its own separator before joining — this previously joined path/reason
+    // raw. A path or exception message that happened to contain the literal FIELD_SEP control
+    // character would silently misparse on decode (wrong field count, or fields shifted). U+0001
+    // essentially never appears in real file paths or exception text, so this was low-risk in
+    // practice, but the project's own established convention (see CleanupCandidateCodec's doc
+    // comment) is to guard this explicitly rather than rely on it being unlikely — so this now
+    // does too, for the same reason.
+    private fun sanitize(s: String): String = s.replace(FIELD_SEP, " ")
+
     private fun encode(outcome: DeletionOutcome): String = when (outcome) {
-        is DeletionOutcome.Deleted -> listOf("DELETED", outcome.path, outcome.bytesFreed.toString()).joinToString(FIELD_SEP)
-        is DeletionOutcome.Failed -> listOf("FAILED", outcome.path, outcome.reason).joinToString(FIELD_SEP)
-        is DeletionOutcome.Protected -> listOf("PROTECTED", outcome.path).joinToString(FIELD_SEP)
-        is DeletionOutcome.AlreadyGone -> listOf("ALREADY_GONE", outcome.path).joinToString(FIELD_SEP)
+        is DeletionOutcome.Deleted -> listOf("DELETED", sanitize(outcome.path), outcome.bytesFreed.toString()).joinToString(FIELD_SEP)
+        is DeletionOutcome.Failed -> listOf("FAILED", sanitize(outcome.path), sanitize(outcome.reason)).joinToString(FIELD_SEP)
+        is DeletionOutcome.Protected -> listOf("PROTECTED", sanitize(outcome.path)).joinToString(FIELD_SEP)
+        is DeletionOutcome.AlreadyGone -> listOf("ALREADY_GONE", sanitize(outcome.path)).joinToString(FIELD_SEP)
     }
 
     private fun decode(raw: String): DeletionOutcome? {

@@ -2,6 +2,10 @@ package com.storagesweep.app.ui
 
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.ClipData
+import androidx.core.content.FileProvider
+import com.storagesweep.app.apk.ApkEntry
+import java.io.File
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -24,11 +28,12 @@ import com.storagesweep.app.ui.theme.StorageSweepTheme
 
 private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
 
-private enum class Screen { DASHBOARD, SCANNING, RESULTS, REVIEW, CLEANING_RESULT, SETTINGS, CAPABILITY_REPORT }
+private enum class Screen { DASHBOARD, APPS, CACHE, ORPHANS, APK, STORAGE_TOOLS, LEFTOVERS, SCANNING, RESULTS, REVIEW, CLEANING_RESULT, SETTINGS, CAPABILITY_REPORT }
 
 class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
+    private var pendingUninstallPackage: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -45,6 +50,61 @@ class MainActivity : ComponentActivity() {
             ActivityResultContracts.RequestPermission()
         ) { /* NotificationHelper re-checks the live grant on every post, no state to update here */ }
 
+        val uninstallLauncher = registerForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) {
+            val packageName = pendingUninstallPackage
+            pendingUninstallPackage = null
+            if (packageName != null) {
+                // ACTION_DELETE returns after either completion or cancellation. Only start the
+                // Revo-style cleanup flow if PackageManager confirms the package is actually gone.
+                if (!com.storagesweep.app.appmanager.AppRepository.isPackageInstalled(this, packageName)) {
+                    viewModel.scanForUninstallLeftovers(packageName)
+                } else {
+                    viewModel.refreshInstalledApps()
+                }
+            }
+        }
+
+        fun apkUri(entry: ApkEntry): Uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", File(entry.path))
+
+        fun shareApk(entry: ApkEntry) {
+            try {
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = when (entry.kind.name.lowercase()) { "apk" -> "application/vnd.android.package-archive" else -> "application/octet-stream" }
+                    putExtra(Intent.EXTRA_STREAM, apkUri(entry))
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    clipData = ClipData.newRawUri(entry.name, apkUri(entry))
+                }
+                startActivity(Intent.createChooser(intent, "Share installer"))
+            } catch (_: Exception) { }
+        }
+
+        fun extractAndShareApk(entry: ApkEntry) {
+            if (entry.kind.name != "APK") return
+            try {
+                val appInfo = packageManager.getApplicationInfo(entry.packageName ?: return, 0)
+                val source = File(appInfo.sourceDir ?: return)
+                val dir = File(cacheDir, "apk_exports").apply { mkdirs() }
+                val safeName = (entry.packageName + "-" + (entry.versionName ?: "apk") + ".apk").replace(Regex("[^A-Za-z0-9._-]"), "_")
+                val out = File(dir, safeName)
+                source.inputStream().use { input -> out.outputStream().use { output -> input.copyTo(output) } }
+                val exported = ApkEntry(out.absolutePath, out.name, out.length(), out.lastModified(), com.storagesweep.app.apk.ApkKind.APK, entry.packageName, entry.versionName, entry.versionCode, true, entry.installedVersionCode)
+                shareApk(exported)
+            } catch (_: Exception) { }
+        }
+
+        fun openApk(entry: ApkEntry) {
+            try {
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    data = apkUri(entry)
+                    type = "application/vnd.android.package-archive"
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(intent)
+            } catch (_: Exception) { }
+        }
+
         setContent {
             StorageSweepTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
@@ -52,6 +112,10 @@ class MainActivity : ComponentActivity() {
                     var reviewCategoryFilter by remember { mutableStateOf<String?>(null) }
                     val scanState by viewModel.scanState.collectAsStateWithLifecycle()
                     val storageStats by viewModel.storageStats.collectAsStateWithLifecycle()
+                    val leftoverState by viewModel.leftoverState.collectAsStateWithLifecycle()
+                    androidx.compose.runtime.LaunchedEffect(leftoverState) {
+                        if (leftoverState is LeftoverUiState.Ready) screen = Screen.LEFTOVERS
+                    }
 
                     // Screen follows scan state for the cleanup tail end (Cleaning/CleanupDone
                     // arrive asynchronously from confirmCleanup), while DASHBOARD/SCANNING/REVIEW
@@ -72,8 +136,54 @@ class MainActivity : ComponentActivity() {
                             },
                             onOpenAllFilesAccessSettings = { openAllFilesAccessSettings() },
                             onScanStarted = { screen = Screen.SCANNING },
+                            onOpenApps = { screen = Screen.APPS },
+                            onOpenCache = { screen = Screen.CACHE },
+                            onOpenOrphans = { screen = Screen.ORPHANS },
+                            onOpenApks = { screen = Screen.APK },
+                            onOpenStorageTools = { screen = Screen.STORAGE_TOOLS },
                             onOpenSettings = { screen = Screen.SETTINGS }
                         )
+                        Screen.APPS -> AppManagerScreen(
+                            viewModel = viewModel,
+                            onBack = { screen = Screen.DASHBOARD },
+                            onUninstall = { packageName ->
+                                pendingUninstallPackage = packageName
+                                uninstallLauncher.launch(
+                                    Intent(Intent.ACTION_DELETE, Uri.parse("package:$packageName"))
+                                )
+                            },
+                            onOpenUsageAccess = { openUsageAccessSettings() }
+                        )
+                        Screen.CACHE -> CacheManagerScreen(
+                            viewModel = viewModel,
+                            onBack = { screen = Screen.DASHBOARD }
+                        )
+                        Screen.ORPHANS -> OrphanManagerScreen(
+                            viewModel = viewModel,
+                            onBack = { screen = Screen.DASHBOARD }
+                        )
+                        Screen.STORAGE_TOOLS -> StorageToolsScreen(
+                            viewModel = viewModel,
+                            onBack = { screen = Screen.DASHBOARD }
+                        )
+                        Screen.APK -> ApkManagerScreen(
+                            viewModel = viewModel,
+                            onBack = { screen = Screen.DASHBOARD },
+                            onOpenFile = ::openApk,
+                            onShareFile = ::shareApk,
+                            onExtractInstalled = ::extractAndShareApk
+                        )
+                        Screen.LEFTOVERS -> {
+                            when (val l = leftoverState) {
+                                is LeftoverUiState.Ready -> LeftoversScreen(
+                                    items = l.items,
+                                    packageName = l.packageName,
+                                    onBack = { screen = Screen.APPS },
+                                    onDelete = { path -> viewModel.deleteLeftover(path) }
+                                )
+                                else -> { screen = Screen.APPS }
+                            }
+                        }
                         Screen.SCANNING -> ScanScreen(
                             viewModel = viewModel,
                             onDone = { screen = Screen.DASHBOARD },
@@ -152,6 +262,12 @@ class MainActivity : ComponentActivity() {
      * next onResume's [MainViewModel.onResume] re-checks Environment.isExternalStorageManager()
      * for real rather than assuming the user granted it.
      */
+    private fun openUsageAccessSettings() {
+        try {
+            startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+        } catch (_: Exception) { }
+    }
+
     private fun openAllFilesAccessSettings() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
         try {

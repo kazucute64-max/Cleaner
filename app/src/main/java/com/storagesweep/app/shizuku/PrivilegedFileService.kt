@@ -57,6 +57,19 @@ class PrivilegedFileService : IPrivilegedFileService.Stub() {
 
     override fun getServiceUid(): Int = Process.myUid()
 
+    override fun clearPackageCache(packageName: String): Int {
+        if (!packageName.matches(Regex("^[A-Za-z][A-Za-z0-9_.]*$"))) return 2
+        return try {
+            val process = ProcessBuilder("pm", "clear", "--cache-only", packageName)
+                .redirectErrorStream(true)
+                .start()
+            process.inputStream.bufferedReader().use { it.readText() }
+            process.waitFor()
+        } catch (_: Exception) {
+            1
+        }
+    }
+
     override fun destroy() {
         // Shizuku calls this then unbinds; no persistent state held here to clean up.
     }

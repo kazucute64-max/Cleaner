@@ -20,6 +20,9 @@
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
 
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -46,9 +49,11 @@
             </intent-filter>
         </activity>
 
-        <!-- Real foreground service (scanner/ScanForegroundService.kt) — mirrors live scan
-             progress into a notification. See HANDOFF.md for what it does and doesn't cover yet
-             (it observes progress; the scan coroutine itself still runs in the ViewModel). -->
+        <!-- Real foreground service (scanner/ScanForegroundService.kt) — the scan coroutine
+             itself runs inside this service's own scope (executeInServiceScope), not the
+             ViewModel's, so it survives Activity/ViewModel teardown. It also mirrors live scan
+             progress into a notification. See HANDOFF.md for exactly what this does and doesn't
+             cover (it does not survive whole-process kill, only ordinary UI lifecycle churn). -->
         <service
             android:name=".scanner.ScanForegroundService"
             android:exported="false"
@@ -64,6 +69,16 @@
 
         <!-- Shizuku requires the host app declare this provider so rikka's ShizukuProvider
              can bind on pre-API28 (Binder-in-provider trick) and register the pipe on newer APIs. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <provider
             android:name="rikka.shizuku.ShizukuProvider"
             android:authorities="${applicationId}.shizuku"

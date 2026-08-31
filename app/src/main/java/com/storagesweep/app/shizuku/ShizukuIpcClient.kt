@@ -55,7 +55,7 @@ class ShizukuIpcClient(private val appPackageName: String) {
             .daemon(false)          // tears down when unbound — no lingering privileged process
             .processNameSuffix("privileged")
             .debuggable(false)
-            .version(2) // bumped: canonicalPath() added to the AIDL contract this session
+            .version(3) // bumped: cache-clearing RPC added to the AIDL contract in Piece 2
 
         Shizuku.bindUserService(args, connection)
         deferred.await()
@@ -102,6 +102,14 @@ class ShizukuIpcClient(private val appPackageName: String) {
      * "safe, no cycle" — callers must fall back to comparing the normalized input path in that
      * case (see PowerScanEngine.walk).
      */
+    suspend fun clearPackageCache(packageName: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            connect().clearPackageCache(packageName) == 0
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
     suspend fun canonicalPath(path: String): String? = withContext(Dispatchers.IO) {
         try {
             connect().canonicalPath(path)

@@ -40,6 +40,11 @@ fun DashboardScreen(
     onRequestStoragePermission: () -> Unit,
     onOpenAllFilesAccessSettings: () -> Unit,
     onScanStarted: () -> Unit,
+    onOpenApps: () -> Unit,
+    onOpenCache: () -> Unit,
+    onOpenOrphans: () -> Unit,
+    onOpenApks: () -> Unit,
+    onOpenStorageTools: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
     val shizukuState by viewModel.shizukuState.collectAsStateWithLifecycle()
@@ -103,6 +108,25 @@ fun DashboardScreen(
                 OptionalAllFilesAccessCard(onOpenAllFiles = onOpenAllFilesAccessSettings)
                 Spacer(Modifier.height(12.dp))
             }
+
+            OutlinedButton(
+                onClick = onOpenApps,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("App Manager")
+            }
+
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onOpenCache, modifier = Modifier.weight(1f)) { Text("App Cache") }
+                OutlinedButton(onClick = onOpenOrphans, modifier = Modifier.weight(1f)) { Text("Orphan Data") }
+            }
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(onClick = onOpenApks, modifier = Modifier.fillMaxWidth()) { Text("APK Manager") }
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(onClick = onOpenStorageTools, modifier = Modifier.fillMaxWidth()) { Text("Storage Tools") }
+
+            Spacer(Modifier.height(12.dp))
 
             Button(
                 onClick = {

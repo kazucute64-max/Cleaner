@@ -39,5 +39,8 @@ interface IPrivilegedFileService {
     /** Lets the client confirm the service is alive and report which UID it's running as. */
     int getServiceUid();
 
+    /** Clears only the Android-managed cache for one validated package. Returns the command exit code. */
+    int clearPackageCache(String packageName);
+
     void destroy();
 }
