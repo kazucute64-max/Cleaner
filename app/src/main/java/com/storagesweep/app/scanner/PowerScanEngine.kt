@@ -77,7 +77,16 @@ class PowerScanEngine(private val ipcClient: ShizukuIpcClient) {
         if (!currentCoroutineContext().isActive) throw CancellationException("Power Scan cancelled")
 
         val normalized = path.trimEnd('/')
-        if (!visited.add(normalized)) return // cycle / duplicate guard (string-based — see class doc)
+        // Real canonical-path cycle guard, same intent as ScannerEngine's local File.canonicalPath
+        // guard — resolved via IPC since we can't call canonicalPath() on a remote path locally.
+        // A null here means resolution itself failed (not "no cycle risk"), so we fall back to
+        // the normalized string for just this one path rather than skip the guard entirely.
+        val cycleKey = try {
+            ipcClient.canonicalPath(path)
+        } catch (e: Throwable) {
+            null
+        } ?: normalized
+        if (!visited.add(cycleKey)) return // cycle / duplicate guard
 
         val entries = try {
             ipcClient.listDirectory(path)
@@ -88,12 +97,11 @@ class PowerScanEngine(private val ipcClient: ShizukuIpcClient) {
             return
         }
 
-        if (entries.isEmpty()) {
-            // Could genuinely be empty, OR unreadable even at shell UID. We can't distinguish
-            // without a dedicated "readable" signal from the service, so we conservatively log
-            // it as protected only when exists() also fails; otherwise treat as an empty dir.
-            val stillExists = try { ipcClient.exists(path) } catch (e: Throwable) { false }
-            if (!stillExists) protectedPaths.add(path)
+        if (entries == null) {
+            // The service told us directly this path is unreadable at shell UID — no follow-up
+            // round trip needed to tell that apart from a genuinely empty directory (see the
+            // AIDL doc on listDirectory and PrivilegedFileService's null-vs-emptyArray return).
+            protectedPaths.add(path)
             dirsScanned.incrementAndGet()
             emitProgress(path)
             return

@@ -1,12 +1,17 @@
 package com.storagesweep.app.scanner
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
+import java.util.Collections
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.coroutineContext
 
@@ -61,7 +66,23 @@ data class ScanSummary(
  */
 data class ScanRoot(val file: File, val label: String, val requiresShizuku: Boolean = false)
 
-class ScannerEngine(private val detectorPipeline: com.storagesweep.app.detector.DetectorPipeline? = null) {
+/**
+ * Bounded-concurrency directory walker. Replaces the earlier purely-sequential recursive walk:
+ * each directory's subdirectories are now launched as concurrent children, gated by a
+ * [Semaphore] so a device isn't hit with unbounded parallel I/O (which would thrash on
+ * lower-end storage and defeat the point of concurrency). [maxConcurrentDirectories] is the
+ * knob — deliberately modest by default since directory listing is I/O-bound, not CPU-bound,
+ * and too much parallelism on eMMC/slow flash storage can make things *slower*, not faster.
+ *
+ * All shared mutable state below had to move from plain collections to concurrency-safe ones
+ * (`ConcurrentHashMap`-backed set, `Collections.synchronizedList`) — the old plain
+ * `mutableListOf()` usage from the sequential version would have been a real data race once
+ * multiple coroutines write to it concurrently.
+ */
+class ScannerEngine(
+    private val detectorPipeline: com.storagesweep.app.detector.DetectorPipeline? = null,
+    private val maxConcurrentDirectories: Int = 4
+) {
 
     private val _progress = MutableSharedFlow<ScanProgress>(replay = 1, extraBufferCapacity = 8)
     val progress: SharedFlow<ScanProgress> = _progress
@@ -70,23 +91,33 @@ class ScannerEngine(private val detectorPipeline: com.storagesweep.app.detector.
     private val dirsScanned = AtomicLong(0)
     private val bytesScanned = AtomicLong(0)
 
-    private val protectedPaths = mutableListOf<String>()
-    private val skippedPaths = mutableListOf<String>()
+    private val protectedPaths = Collections.synchronizedList(mutableListOf<String>())
+    private val skippedPaths = Collections.synchronizedList(mutableListOf<String>())
 
     // Guards against symlink cycles and re-scanning the same inode reachable via two paths.
-    private val visitedCanonicalPaths = HashSet<String>()
+    // ConcurrentHashMap.newKeySet() rather than a plain HashSet, since multiple walker
+    // coroutines now check/insert into this concurrently.
+    private val visitedCanonicalPaths = ConcurrentHashMap.newKeySet<String>()
+
+    private lateinit var semaphore: Semaphore
 
     suspend fun scan(roots: List<ScanRoot>, collectFiles: Boolean = false): ScanSummary = withContext(Dispatchers.IO) {
         val startTime = System.currentTimeMillis()
         filesScanned.set(0); dirsScanned.set(0); bytesScanned.set(0)
         protectedPaths.clear(); skippedPaths.clear(); visitedCanonicalPaths.clear()
+        semaphore = Semaphore(maxConcurrentDirectories)
 
-        val candidates = mutableListOf<ScanCandidate>()
-        val allFiles = if (collectFiles) mutableListOf<File>() else null
+        val candidates = Collections.synchronizedList(mutableListOf<ScanCandidate>())
+        val allFiles = if (collectFiles) Collections.synchronizedList(mutableListOf<File>()) else null
 
-        for (root in roots) {
-            coroutineContext.ensureActive()
-            walk(root.file, candidates, allFiles)
+        coroutineScope {
+            for (root in roots) {
+                coroutineContext.ensureActive()
+                // Top-level roots are launched concurrently too (each still gated by the same
+                // semaphore as nested subdirectories, so total in-flight directory reads across
+                // every root combined never exceeds maxConcurrentDirectories).
+                launch { walk(root.file, candidates, allFiles) }
+            }
         }
 
         ScanSummary(
@@ -96,7 +127,7 @@ class ScannerEngine(private val detectorPipeline: com.storagesweep.app.detector.
             protectedPaths = protectedPaths.toList(),
             skippedPaths = skippedPaths.toList(),
             durationMs = System.currentTimeMillis() - startTime,
-            candidates = candidates,
+            candidates = candidates.toList(),
             scannedFiles = allFiles?.toList() ?: emptyList()
         )
     }
@@ -111,9 +142,11 @@ class ScannerEngine(private val detectorPipeline: com.storagesweep.app.detector.
         }
         if (!visitedCanonicalPaths.add(canonical)) return // symlink cycle / already visited
 
+        // The semaphore permit is held only for the actual listFiles() I/O call, not for the
+        // per-entry processing below — holding it longer would needlessly serialize CPU-bound
+        // classification work that doesn't need bounding the way directory I/O does.
         val entries: Array<File> = try {
-            dir.listFiles() ?: run {
-                // null means: not a directory, or a SecurityException/IO error swallowed by the JDK.
+            semaphore.withPermit { dir.listFiles() } ?: run {
                 if (!dir.canRead()) {
                     protectedPaths.add(dir.path)
                 } else {
@@ -128,30 +161,32 @@ class ScannerEngine(private val detectorPipeline: com.storagesweep.app.detector.
         dirsScanned.incrementAndGet()
         emitProgress(dir.path)
 
-        for (entry in entries) {
-            coroutineContext.ensureActive()
-            try {
-                if (!entry.exists()) {
-                    // Disappeared between listFiles() and now — skip silently, don't fabricate a size.
-                    continue
-                }
-                if (entry.isDirectory && !entry.isSymlinkLoopSuspect(canonical)) {
-                    walk(entry, candidates, allFiles)
-                } else if (entry.isFile) {
-                    val size = try {
-                        entry.length()
-                    } catch (e: SecurityException) {
-                        protectedPaths.add(entry.path); continue
+        coroutineScope {
+            for (entry in entries) {
+                coroutineContext.ensureActive()
+                try {
+                    if (!entry.exists()) {
+                        // Disappeared between listFiles() and now — skip silently, don't fabricate a size.
+                        continue
                     }
-                    filesScanned.incrementAndGet()
-                    bytesScanned.addAndGet(size)
-                    allFiles?.add(entry)
-                    classify(entry, size)?.let { candidates.add(it) }
+                    if (entry.isDirectory && !entry.isSymlinkLoopSuspect(canonical)) {
+                        launch { walk(entry, candidates, allFiles) }
+                    } else if (entry.isFile) {
+                        val size = try {
+                            entry.length()
+                        } catch (e: SecurityException) {
+                            protectedPaths.add(entry.path); continue
+                        }
+                        filesScanned.incrementAndGet()
+                        bytesScanned.addAndGet(size)
+                        allFiles?.add(entry)
+                        classify(entry, size)?.let { candidates.add(it) }
+                    }
+                } catch (e: SecurityException) {
+                    protectedPaths.add(entry.path)
+                } catch (e: IOException) {
+                    skippedPaths.add(entry.path)
                 }
-            } catch (e: SecurityException) {
-                protectedPaths.add(entry.path)
-            } catch (e: IOException) {
-                skippedPaths.add(entry.path)
             }
         }
     }

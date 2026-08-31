@@ -9,9 +9,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -34,7 +39,8 @@ fun DashboardScreen(
     onOpenShizuku: () -> Unit,
     onRequestStoragePermission: () -> Unit,
     onOpenAllFilesAccessSettings: () -> Unit,
-    onScanStarted: () -> Unit
+    onScanStarted: () -> Unit,
+    onOpenSettings: () -> Unit
 ) {
     val shizukuState by viewModel.shizukuState.collectAsStateWithLifecycle()
     val storageStats by viewModel.storageStats.collectAsStateWithLifecycle()
@@ -54,7 +60,13 @@ fun DashboardScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("StorageSweep", style = MaterialTheme.typography.headlineMedium)
-                ShizukuStatusChip(state = shizukuState)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ShizukuStatusChip(state = shizukuState)
+                    Spacer(Modifier.width(8.dp))
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(imageVector = Icons.Default.Settings, contentDescription = "Settings")
+                    }
+                }
             }
 
             Spacer(Modifier.height(32.dp))

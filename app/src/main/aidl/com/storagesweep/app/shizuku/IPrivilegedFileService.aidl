@@ -10,8 +10,10 @@ interface IPrivilegedFileService {
 
     /**
      * Lists one directory. Each entry is "name|isDir(0/1)|sizeBytes|lastModifiedMs".
-     * Returns an empty array (not null) if the path is unreadable even at shell UID —
-     * callers must record that as Protected, not silently skip it.
+     * Returns null if the path could not be read at shell UID (SecurityException or any other
+     * read failure) — this is the signal callers must treat as Protected. Returns an empty
+     * (zero-length, non-null) array if the directory genuinely has no entries. These two cases
+     * are NOT the same thing and callers must check for null explicitly, not just emptiness.
      */
     String[] listDirectory(String path);
 
@@ -23,6 +25,16 @@ interface IPrivilegedFileService {
 
     /** Deletes a single file/empty directory. Returns the real outcome — never assumed. */
     boolean deletePath(String path);
+
+    /**
+     * Resolves the real canonical path at shell UID (symlinks/`.`/`..` resolved), the same way
+     * ScannerEngine's local walk uses File.canonicalPath for its cycle guard. Returns null if
+     * canonicalization itself fails (e.g. SecurityException, or the path vanished) — callers
+     * must fall back to a normalized-string comparison for that single path rather than treat
+     * a null as "no cycle risk here", since a resolution failure tells you nothing about
+     * whether a cycle exists.
+     */
+    String canonicalPath(String path);
 
     /** Lets the client confirm the service is alive and report which UID it's running as. */
     int getServiceUid();

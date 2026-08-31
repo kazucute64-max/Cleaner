@@ -46,6 +46,9 @@
             </intent-filter>
         </activity>
 
+        <!-- Real foreground service (scanner/ScanForegroundService.kt) — mirrors live scan
+             progress into a notification. See HANDOFF.md for what it does and doesn't cover yet
+             (it observes progress; the scan coroutine itself still runs in the ViewModel). -->
         <service
             android:name=".scanner.ScanForegroundService"
             android:exported="false"

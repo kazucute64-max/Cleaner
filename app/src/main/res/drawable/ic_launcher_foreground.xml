@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Real launcher glyph, replacing the earlier placeholder ring:
+     a storage drive (accent blue, matches SweepAccent #5B9CFF) with a data-row detail,
+     being crossed by a green "sweep" stroke (matches StatusReady #3DDC84 — the same green
+     used for the "cleaned/ready" Shizuku state elsewhere in the app, so the icon's success
+     color isn't an arbitrary new hue) with small debris dots trailing off the swept corner.
+     All primary content stays within the ~66dp adaptive-icon safe zone (roughly x:[21,87],
+     y:[21,87] in this 108x108 viewport); the debris dots intentionally bleed toward the edge
+     since getting cropped by a round/square mask reads fine for a decorative "flying off"
+     motif. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Drive body -->
+    <path
+        android:fillColor="#5B9CFF"
+        android:pathData="M38,40 H70 A8,8 0 0 1 78,48 V64 A8,8 0 0 1 70,72 H38 A8,8 0 0 1 30,64 V48 A8,8 0 0 1 38,40 Z" />
+
+    <!-- Status slot cutout near the top of the drive -->
+    <path
+        android:fillColor="#0E1013"
+        android:pathData="M40,48 H68 V52 H40 Z" />
+
+    <!-- Data rows -->
+    <path
+        android:fillColor="#0E1013"
+        android:fillAlpha="0.55"
+        android:pathData="M40,56 H62 V59 H40 Z" />
+    <path
+        android:fillColor="#0E1013"
+        android:fillAlpha="0.55"
+        android:pathData="M40,62 H54 V65 H40 Z" />
+
+    <!-- Sweep stroke crossing the drive, top-right to bottom-left -->
+    <path
+        android:strokeColor="#3DDC84"
+        android:strokeWidth="7"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M78,28 C64,46 46,64 28,80" />
+
+    <!-- Debris being swept off the corner -->
+    <path
+        android:fillColor="#9AA1AB"
+        android:fillAlpha="0.9"
+        android:pathData="M86,20 m-3,0 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0" />
+    <path
+        android:fillColor="#9AA1AB"
+        android:fillAlpha="0.6"
+        android:pathData="M92.5,26.5 m-2.2,0 a2.2,2.2 0 1,0 4.4,0 a2.2,2.2 0 1,0 -4.4,0" />
+    <path
+        android:fillColor="#9AA1AB"
+        android:fillAlpha="0.35"
+        android:pathData="M97,32.5 m-1.5,0 a1.5,1.5 0 1,0 3,0 a1.5,1.5 0 1,0 -3,0" />
+</vector>

@@ -55,7 +55,7 @@ class ShizukuIpcClient(private val appPackageName: String) {
             .daemon(false)          // tears down when unbound — no lingering privileged process
             .processNameSuffix("privileged")
             .debuggable(false)
-            .version(1)
+            .version(2) // bumped: canonicalPath() added to the AIDL contract this session
 
         Shizuku.bindUserService(args, connection)
         deferred.await()
@@ -70,9 +70,16 @@ class ShizukuIpcClient(private val appPackageName: String) {
         binder = null
     }
 
-    suspend fun listDirectory(path: String): List<PrivilegedFileEntry> = withContext(Dispatchers.IO) {
+    /**
+     * Returns null if the directory is unreadable at shell UID, or an empty (possibly
+     * zero-length) list if it's genuinely empty. Callers must check for null, not just
+     * emptiness — collapsing the two into "empty list either way" is exactly the ambiguity
+     * this method exists to avoid.
+     */
+    suspend fun listDirectory(path: String): List<PrivilegedFileEntry>? = withContext(Dispatchers.IO) {
         val service = connect()
-        service.listDirectory(path).mapNotNull { line ->
+        val raw = service.listDirectory(path) ?: return@withContext null
+        raw.mapNotNull { line ->
             val parts = line.split("|")
             if (parts.size != 4) return@mapNotNull null
             PrivilegedFileEntry(
@@ -89,4 +96,17 @@ class ShizukuIpcClient(private val appPackageName: String) {
     suspend fun exists(path: String): Boolean = withContext(Dispatchers.IO) { connect().exists(path) }
 
     suspend fun deletePath(path: String): Boolean = withContext(Dispatchers.IO) { connect().deletePath(path) }
+
+    /**
+     * Real canonical path at shell UID, or null if resolution itself failed. Null does NOT mean
+     * "safe, no cycle" — callers must fall back to comparing the normalized input path in that
+     * case (see PowerScanEngine.walk).
+     */
+    suspend fun canonicalPath(path: String): String? = withContext(Dispatchers.IO) {
+        try {
+            connect().canonicalPath(path)
+        } catch (e: Throwable) {
+            null // binder death mid-call — treated the same as a resolution failure
+        }
+    }
 }

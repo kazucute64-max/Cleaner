@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Status-bar notification icon. Android renders notification small icons as a flat
+     alpha-mask silhouette — it ignores any color info and re-tints the shape itself (white
+     in the status bar, dark in some notification-shade themes), so this intentionally has
+     no color values and no fine detail: just a solid drive outline crossed by the sweep
+     stroke, simplified from the launcher icon's drive+sweep motif down to what actually
+     survives legibly at 24dp. The status-slot/data-row/debris-dot details on the launcher
+     icon are dropped here — they'd disappear into noise at this size. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFF">
+
+    <!-- Drive outline (stroke, not fill, so it survives as a legible ring at 24dp) -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="1.6"
+        android:pathData="M8,7 H16 A2,2 0 0 1 18,9 V15 A2,2 0 0 1 16,17 H8 A2,2 0 0 1 6,15 V9 A2,2 0 0 1 8,7 Z" />
+
+    <!-- Sweep stroke crossing the drive, same top-right-to-bottom-left direction as the
+         launcher icon's sweep, scaled to this viewport -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round"
+        android:pathData="M17.5,4.5 C15,8.5 11,13.5 6.5,18" />
+</vector>

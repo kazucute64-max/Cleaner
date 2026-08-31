@@ -12,13 +12,13 @@ import java.io.File
  */
 class PrivilegedFileService : IPrivilegedFileService.Stub() {
 
-    override fun listDirectory(path: String): Array<String> {
+    override fun listDirectory(path: String): Array<String>? {
         val dir = File(path)
         val children = try {
             dir.listFiles()
         } catch (e: SecurityException) {
             null
-        } ?: return emptyArray()
+        } ?: return null // unreadable — distinct from a genuinely empty directory below
 
         return children.map { f ->
             val size = try { if (f.isDirectory) 0L else f.length() } catch (e: SecurityException) { -1L }
@@ -45,6 +45,14 @@ class PrivilegedFileService : IPrivilegedFileService.Stub() {
         if (!f.exists()) false else f.delete()
     } catch (e: SecurityException) {
         false
+    }
+
+    override fun canonicalPath(path: String): String? = try {
+        File(path).canonicalPath
+    } catch (e: java.io.IOException) {
+        null
+    } catch (e: SecurityException) {
+        null
     }
 
     override fun getServiceUid(): Int = Process.myUid()

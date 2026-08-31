@@ -38,7 +38,14 @@ class CleanupEngine(private val ipcClient: ShizukuIpcClient?) {
         return CleanupResult(outcomes)
     }
 
-    private suspend fun deleteOne(candidate: ScanCandidate): DeletionOutcome {
+    /**
+     * Deletes exactly one candidate and returns its real outcome. Exposed (not just used
+     * internally by [cleanup]) so [com.storagesweep.app.cleanup.work.CleanupWorker] can persist
+     * each outcome to [CleanupStateRepository] the moment it happens, rather than only after an
+     * entire batch finishes — that per-item persistence is what makes a cleanup run resumable
+     * if the whole process is killed partway through.
+     */
+    suspend fun deleteOne(candidate: ScanCandidate): DeletionOutcome {
         if (candidate.classification in neverDeletable) {
             return DeletionOutcome.Protected(candidate.path)
         }

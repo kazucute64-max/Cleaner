@@ -24,7 +24,7 @@ import com.storagesweep.app.ui.theme.StorageSweepTheme
 
 private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
 
-private enum class Screen { DASHBOARD, SCANNING, RESULTS, REVIEW, CLEANING_RESULT }
+private enum class Screen { DASHBOARD, SCANNING, RESULTS, REVIEW, CLEANING_RESULT, SETTINGS, CAPABILITY_REPORT }
 
 class MainActivity : ComponentActivity() {
 
@@ -38,6 +38,12 @@ class MainActivity : ComponentActivity() {
         val runtimePermissionLauncher = registerForActivityResult(
             ActivityResultContracts.RequestMultiplePermissions()
         ) { viewModel.onRuntimePermissionResult() }
+
+        // Separate launcher for POST_NOTIFICATIONS (API 33+) — requested when the user turns
+        // the notifications toggle on in Settings, not preemptively at app launch.
+        val notificationPermissionLauncher = registerForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { /* NotificationHelper re-checks the live grant on every post, no state to update here */ }
 
         setContent {
             StorageSweepTheme {
@@ -65,7 +71,8 @@ class MainActivity : ComponentActivity() {
                                 runtimePermissionLauncher.launch(PermissionManager.runtimePermissionsToRequest())
                             },
                             onOpenAllFilesAccessSettings = { openAllFilesAccessSettings() },
-                            onScanStarted = { screen = Screen.SCANNING }
+                            onScanStarted = { screen = Screen.SCANNING },
+                            onOpenSettings = { screen = Screen.SETTINGS }
                         )
                         Screen.SCANNING -> ScanScreen(
                             viewModel = viewModel,
@@ -110,6 +117,22 @@ class MainActivity : ComponentActivity() {
                                 else -> screen = Screen.DASHBOARD
                             }
                         }
+                        Screen.SETTINGS -> SettingsScreen(
+                            viewModel = viewModel,
+                            onBack = { screen = Screen.DASHBOARD },
+                            onRequestNotificationPermission = {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                    notificationPermissionLauncher.launch(
+                                        android.Manifest.permission.POST_NOTIFICATIONS
+                                    )
+                                }
+                            },
+                            onOpenCapabilityReport = { screen = Screen.CAPABILITY_REPORT }
+                        )
+                        Screen.CAPABILITY_REPORT -> CapabilityReportScreen(
+                            viewModel = viewModel,
+                            onBack = { screen = Screen.SETTINGS }
+                        )
                     }
                 }
             }
