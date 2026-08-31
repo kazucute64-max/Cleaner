@@ -1,7 +1,6 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
@@ -39,6 +38,13 @@ android {
     buildFeatures {
         compose = true
         aidl = true
+    }
+
+    // Kotlin 1.9.24 uses the classic Compose compiler plugin, configured here rather than
+    // via the org.jetbrains.kotlin.plugin.compose Gradle plugin (that one requires Kotlin 2.0+).
+    // 1.5.14 is the Compose compiler release matched to Kotlin 1.9.24.
+    composeOptions {
+        kotlinCompilerExtensionVersion = "1.5.14"
     }
 
     packaging {

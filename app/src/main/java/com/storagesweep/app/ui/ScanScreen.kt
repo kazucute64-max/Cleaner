@@ -70,7 +70,7 @@ fun ScanScreen(viewModel: MainViewModel, onDone: () -> Unit, onReview: () -> Uni
                     )
                     Spacer(Modifier.height(24.dp))
                     androidx.compose.material3.Button(onClick = onReview, modifier = Modifier.fillMaxWidth()) {
-                        Text("Review results")
+                        Text("View results")
                     }
                     Spacer(Modifier.height(8.dp))
                     OutlinedButton(onClick = onDone, modifier = Modifier.fillMaxWidth()) {

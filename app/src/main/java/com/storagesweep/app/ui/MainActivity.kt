@@ -24,7 +24,7 @@ import com.storagesweep.app.ui.theme.StorageSweepTheme
 
 private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
 
-private enum class Screen { DASHBOARD, SCANNING, REVIEW, CLEANING_RESULT }
+private enum class Screen { DASHBOARD, SCANNING, RESULTS, REVIEW, CLEANING_RESULT }
 
 class MainActivity : ComponentActivity() {
 
@@ -43,7 +43,9 @@ class MainActivity : ComponentActivity() {
             StorageSweepTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     var screen by remember { mutableStateOf(Screen.DASHBOARD) }
+                    var reviewCategoryFilter by remember { mutableStateOf<String?>(null) }
                     val scanState by viewModel.scanState.collectAsStateWithLifecycle()
+                    val storageStats by viewModel.storageStats.collectAsStateWithLifecycle()
 
                     // Screen follows scan state for the cleanup tail end (Cleaning/CleanupDone
                     // arrive asynchronously from confirmCleanup), while DASHBOARD/SCANNING/REVIEW
@@ -68,14 +70,30 @@ class MainActivity : ComponentActivity() {
                         Screen.SCANNING -> ScanScreen(
                             viewModel = viewModel,
                             onDone = { screen = Screen.DASHBOARD },
-                            onReview = { screen = Screen.REVIEW }
+                            onReview = { screen = Screen.RESULTS }
                         )
+                        Screen.RESULTS -> {
+                            val s = scanState
+                            if (s is ScanUiState.Results) {
+                                ResultsScreen(
+                                    summary = s.summary,
+                                    storageStats = storageStats,
+                                    onReviewCategory = { category ->
+                                        reviewCategoryFilter = category
+                                        screen = Screen.REVIEW
+                                    }
+                                )
+                            } else {
+                                screen = Screen.DASHBOARD
+                            }
+                        }
                         Screen.REVIEW -> {
                             val s = scanState
                             if (s is ScanUiState.Results) {
                                 ReviewScreen(
                                     viewModel = viewModel,
                                     summary = s.summary,
+                                    initialCategoryFilter = reviewCategoryFilter,
                                     onDone = { /* nav handled by LaunchedEffect above */ }
                                 )
                             } else {
