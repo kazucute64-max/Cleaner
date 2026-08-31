@@ -67,7 +67,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val shizukuStateManager =
         (application as StorageSweepApp).shizukuStateManager
-    private val notificationHelper = application.notificationHelper
+    private val notificationHelper =
+        (application as StorageSweepApp).notificationHelper
 
     val shizukuState: StateFlow<ShizukuState> = shizukuStateManager.state
 
