@@ -30,6 +30,7 @@ import com.storagesweep.app.detector.LargeFileThreshold
 import com.storagesweep.app.permission.StoragePermissionState
 import com.storagesweep.app.shizuku.ShizukuState
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     viewModel: MainViewModel,

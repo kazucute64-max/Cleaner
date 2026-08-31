@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.MaterialTheme
@@ -29,6 +30,7 @@ import com.storagesweep.app.capability.CapabilityReport
 import com.storagesweep.app.permission.StoragePermissionState
 import com.storagesweep.app.shizuku.ShizukuState
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CapabilityReportScreen(viewModel: MainViewModel, onBack: () -> Unit) {
     // Generated once when the screen opens (a snapshot of live state at that moment) rather than
