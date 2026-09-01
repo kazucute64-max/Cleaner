@@ -205,7 +205,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _storageToolsLoading.value = true
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             try {
-                _storageCategories.value = StorageScanner.categorySizes(Environment.getExternalStorageDirectory())
+                _storageCategories.value = StorageScanner.categorySizes(
+                    Environment.getExternalStorageDirectory(),
+                    ipcClientIfAuthorized()
+                )
             } finally {
                 _storageToolsLoading.value = false
             }
@@ -250,10 +253,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Only passes the privileged client when Shizuku is actually authorized — ShizukuIpcClient's own contract requires this. */
+    private fun ipcClientIfAuthorized(): ShizukuIpcClient? =
+        if (shizukuStateManager.state.value == ShizukuState.RUNNING_AUTHORIZED) ipcClient else null
+
     fun scanOrphanedDirectories() {
         _orphanState.value = OrphanUiState.Loading
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            _orphanState.value = OrphanUiState.Ready(OrphanRepository.scan(getApplication()))
+            _orphanState.value = OrphanUiState.Ready(OrphanRepository.scan(getApplication(), ipcClientIfAuthorized()))
         }
     }
 
@@ -262,7 +269,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val state = _orphanState.value
             if (state !is OrphanUiState.Ready) return@launch
             val item = state.items.firstOrNull { it.path == path } ?: return@launch
-            if (OrphanDeletion.delete(item.path)) {
+            val deleted = if (item.requiresShizuku) {
+                val client = ipcClientIfAuthorized() ?: return@launch // Shizuku no longer authorized — don't attempt a plain delete that will just fail against the same restriction
+                OrphanDeletion.deletePrivileged(client, item.path)
+            } else {
+                OrphanDeletion.delete(item.path)
+            }
+            if (deleted) {
                 _orphanState.value = OrphanUiState.Ready(state.items.filterNot { it.path == path })
             }
         }
@@ -288,7 +301,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun scanForUninstallLeftovers(packageName: String) {
         _leftoverState.value = LeftoverUiState.Scanning
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val items = try { AppRepository.findLeftovers(getApplication(), packageName) } catch (_: Exception) { emptyList() }
+            val items = try {
+                AppRepository.findLeftovers(getApplication(), packageName, ipcClientIfAuthorized())
+            } catch (_: Exception) { emptyList() }
             _leftoverState.value = LeftoverUiState.Ready(packageName, items)
             refreshInstalledApps()
         }
@@ -296,19 +311,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteLeftover(path: String) {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val file = File(path)
-            if (!file.exists()) return@launch
             // Only allow deletion of the exact item currently presented by the leftover scan.
             val state = _leftoverState.value
             if (state !is LeftoverUiState.Ready) return@launch
             val item = state.items.firstOrNull { it.path == path } ?: return@launch
             if (item.confidence != com.storagesweep.app.appmanager.Confidence.SAFE) return@launch
-            val root = Environment.getExternalStorageDirectory().canonicalFile
-            val target = try { file.canonicalFile } catch (_: Exception) { return@launch }
-            val allowed = target.path == root.path || target.path.startsWith(root.path + File.separator)
-            if (!allowed) return@launch
-            if (file.isDirectory) file.deleteRecursively() else file.delete()
-            val remaining = AppRepository.findLeftovers(getApplication(), state.packageName)
+
+            if (item.requiresShizuku) {
+                val client = ipcClientIfAuthorized() ?: return@launch
+                val stillExists = try { client.exists(path) } catch (e: Throwable) { false }
+                if (!stillExists) return@launch
+                client.deletePath(path)
+            } else {
+                val file = File(path)
+                if (!file.exists()) return@launch
+                val root = Environment.getExternalStorageDirectory().canonicalFile
+                val target = try { file.canonicalFile } catch (_: Exception) { return@launch }
+                val allowed = target.path == root.path || target.path.startsWith(root.path + File.separator)
+                if (!allowed) return@launch
+                if (file.isDirectory) file.deleteRecursively() else file.delete()
+            }
+
+            val remaining = AppRepository.findLeftovers(getApplication(), state.packageName, ipcClientIfAuthorized())
             _leftoverState.value = state.copy(items = remaining)
         }
     }

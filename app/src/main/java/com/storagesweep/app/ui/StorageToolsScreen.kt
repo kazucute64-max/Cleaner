@@ -95,8 +95,19 @@ private fun BreakdownContent(categories: List<com.storagesweep.app.storage.Stora
     if (loading) CircularProgressIndicator()
     LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         items(categories, key = { it.name }) { category ->
-            Card(Modifier.fillMaxWidth()) { Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(category.name); Text(category.sizeBytes.toHumanBytes())
+            Card(Modifier.fillMaxWidth()) { Column(Modifier.fillMaxWidth().padding(14.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(category.name)
+                    Text((if (category.partial) "≥ " else "") + category.sizeBytes.toHumanBytes())
+                }
+                // partial=true means part of this category couldn't be measured at all — not
+                // that it was measured as small. Say so, rather than let the number look final.
+                if (category.partial) {
+                    Text(
+                        "Some content here isn't readable without Shizuku Power Scan — this total is a minimum, not the full size.",
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
             } }
         }
     }

@@ -40,9 +40,18 @@ class PrivilegedFileService : IPrivilegedFileService.Stub() {
         false
     }
 
+    /**
+     * BUG FIX (found on re-analysis, Piece 1/2 leftover-detection work): plain File.delete()
+     * only succeeds on an empty directory. The only real caller of this for a directory
+     * (orphaned app-data/OBB cleanup) is deleting non-empty trees by definition — without
+     * recursion this always returned false for the actual use case it exists for. Still an
+     * honest success/failure signal either way; this just makes success achievable.
+     */
     override fun deletePath(path: String): Boolean = try {
         val f = File(path)
-        if (!f.exists()) false else f.delete()
+        if (!f.exists()) false
+        else if (f.isDirectory) f.deleteRecursively() && !f.exists()
+        else f.delete()
     } catch (e: SecurityException) {
         false
     }

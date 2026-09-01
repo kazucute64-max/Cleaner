@@ -68,6 +68,11 @@ class MainActivity : ComponentActivity() {
 
         fun apkUri(entry: ApkEntry): Uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", File(entry.path))
 
+        // BUG FIX (found on re-analysis): these three previously had `catch (_: Exception) {}` —
+        // a real failure (no app installed that can view/share a package archive, FileProvider
+        // misconfiguration, a disappeared source file) produced no feedback at all, silently
+        // doing nothing. Toast is the minimal honest fix: report what actually went wrong rather
+        // than let the tap appear to do nothing.
         fun shareApk(entry: ApkEntry) {
             try {
                 val intent = Intent(Intent.ACTION_SEND).apply {
@@ -77,21 +82,32 @@ class MainActivity : ComponentActivity() {
                     clipData = ClipData.newRawUri(entry.name, apkUri(entry))
                 }
                 startActivity(Intent.createChooser(intent, "Share installer"))
-            } catch (_: Exception) { }
+            } catch (e: Exception) {
+                android.widget.Toast.makeText(this, "Couldn't share ${entry.name}: ${e.message ?: e.javaClass.simpleName}", android.widget.Toast.LENGTH_LONG).show()
+            }
         }
 
         fun extractAndShareApk(entry: ApkEntry) {
             if (entry.kind.name != "APK") return
             try {
-                val appInfo = packageManager.getApplicationInfo(entry.packageName ?: return, 0)
-                val source = File(appInfo.sourceDir ?: return)
+                val pkg = entry.packageName ?: run {
+                    android.widget.Toast.makeText(this, "No package identity known for ${entry.name}", android.widget.Toast.LENGTH_LONG).show()
+                    return
+                }
+                val appInfo = packageManager.getApplicationInfo(pkg, 0)
+                val source = appInfo.sourceDir?.let { File(it) } ?: run {
+                    android.widget.Toast.makeText(this, "Couldn't locate the installed APK for $pkg", android.widget.Toast.LENGTH_LONG).show()
+                    return
+                }
                 val dir = File(cacheDir, "apk_exports").apply { mkdirs() }
                 val safeName = (entry.packageName + "-" + (entry.versionName ?: "apk") + ".apk").replace(Regex("[^A-Za-z0-9._-]"), "_")
                 val out = File(dir, safeName)
                 source.inputStream().use { input -> out.outputStream().use { output -> input.copyTo(output) } }
                 val exported = ApkEntry(out.absolutePath, out.name, out.length(), out.lastModified(), com.storagesweep.app.apk.ApkKind.APK, entry.packageName, entry.versionName, entry.versionCode, true, entry.installedVersionCode)
                 shareApk(exported)
-            } catch (_: Exception) { }
+            } catch (e: Exception) {
+                android.widget.Toast.makeText(this, "Couldn't extract ${entry.name}: ${e.message ?: e.javaClass.simpleName}", android.widget.Toast.LENGTH_LONG).show()
+            }
         }
 
         fun openApk(entry: ApkEntry) {
@@ -102,7 +118,11 @@ class MainActivity : ComponentActivity() {
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
                 startActivity(intent)
-            } catch (_: Exception) { }
+            } catch (e: android.content.ActivityNotFoundException) {
+                android.widget.Toast.makeText(this, "No app found to open package installers", android.widget.Toast.LENGTH_LONG).show()
+            } catch (e: Exception) {
+                android.widget.Toast.makeText(this, "Couldn't open ${entry.name}: ${e.message ?: e.javaClass.simpleName}", android.widget.Toast.LENGTH_LONG).show()
+            }
         }
 
         setContent {
