@@ -8,6 +8,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.storagesweep.app.apk.ApkEntry
 import com.storagesweep.app.apk.ApkKind
 import com.storagesweep.app.util.toHumanBytes
@@ -104,6 +105,14 @@ fun ApkManagerScreen(viewModel: MainViewModel, onBack: () -> Unit, onOpenFile: (
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun Stat(label: String, value: String) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, style = MaterialTheme.typography.bodySmall)
+        Text(value, style = MaterialTheme.typography.bodyMedium)
     }
 }
 
